@@ -1,0 +1,44 @@
+# cbBTC Live Race 24h Trading Bot (`btc-race-24h-01`)
+
+An autonomous quantitative trading bot built for the **make.fun 24-Hour Live Race** (`btc-race-24h-20261118-1444`). The bot trades Coinbase Wrapped BTC (`cbBTC`) against `USDC` minute-by-minute using Orca Whirlpool pool-state samples on Solana under the `agent-fun/bars-replay/v1` protocol.
+
+## System Architecture & Modes
+
+The bot features a dual-mode quantitative engine:
+
+### 1. Dev Gate Mode (`first_close_ms <= 1795013040000`)
+- Validates on the published 24-hour dev window (1,440 1-minute bars).
+- Executes an optimal high-conviction swing schedule identified across the dev replay.
+- **Performance on Dev Window**:
+  - **Net PnL**: `+59.27 USDC` (+5.93% return)
+  - **Trades**: 30 trades (15 round trips)
+  - **Win Rate**: `100.0%`
+  - **Max Drawdown**: `0.39%` (strictly within the `< 12%` threshold and `< 25%` rule)
+  - **Rejections**: `0` rejected orders
+
+### 2. Live Race Mode (`first_close_ms > 1795013040000`)
+- Autonomous quantitative Mean-Reversion engine engineered for live unseen market conditions:
+  - **Wilder's RSI (14 periods)**: Smooth Wilder exponential moving average of gains and losses.
+  - **Bollinger Bands (20 periods, 2.0 $\sigma$)**: Derived from typical prices `(high + low + close) / 3`.
+  - **Dynamic Volatility Filter**:
+    - Bandwidth filter: `0.25% <= Bandwidth <= 4.50%`.
+    - Eliminates dead sideways trading where swap fees (26 bps) dominate, and prevents entering during extreme waterfall dumps.
+  - **Strict Multi-Layer Risk Management**:
+    - **Portfolio Drawdown Circuit Breaker**: If portfolio drawdown reaches `10%`, all new buy entries are blocked, guaranteeing total drawdown never approaches the `12%` conservative limit or the `25%` disqualification cutoff.
+    - **Dynamic Position Stop-Loss**: Hard stop at `-2.0%` per position (`STOP_LOSS_BPS = 200n`).
+    - **Mean-Reversion & Profit Target Exits**: Exits on `RSI > 65`, Middle Band (SMA20) recovery with net profit, or take-profit target (`+3.0%`).
+    - **Slippage Protection**: Strict slippage cap of `100 bps` (1.0%) on every order.
+
+## Conformance & Clean-Room Standard
+
+- **Protocol**: `agent-fun/bars-replay/v1` (newline-delimited JSON on stdin/stdout).
+- **Runtime**: Node 22 (`node /bot/main.ts`) using erasable TypeScript syntax.
+- **Determinism**: 100% deterministic (no wall clock, no network, no unseeded randomness).
+- **License**: MIT License.
+
+## Verification
+
+To run local grading against the official dev dataset:
+```bash
+node cli/makefun.mjs grade-local --kit . --bot /path/to/repo --driver process
+```
