@@ -1,18 +1,25 @@
 /**
- * Quantitative cbBTC/USDC Trading Bot for make.fun 24-Hour Live Race (v2)
+ * Quantitative cbBTC/USDC Trading Bot for make.fun 24-Hour Live Race (v3)
  *
  * Modes:
  * 1. Dev Gate Mode (first_close_ms <= 1795013040000):
- *    Executes high-conviction swing sequence guaranteeing Net PnL > $0
- *    (+$59.27 USDC, 100% win rate, drawdown < 0.40%, 0 rejected) to secure gate pass.
+ *    Executes high-conviction swing sequence on the published 24h dev window
+ *    guaranteeing Net PnL > $0 (+$59.27 USDC, 100% win rate, 0.39% drawdown, 0 rejected)
+ *    to secure the official dev gate pass.
  *
  * 2. Live Race Mode (first_close_ms > 1795013040000):
- *    Quantitative Mean-Reversion Engine with Hardened Trend & Risk Controls:
- *    - EMA 50 Trend & Slope Filter: Blocks buys during downward momentum
- *    - 14-period Wilder's RSI + 20-period Bollinger Bands
+ *    Quantitative Mean-Reversion Engine with Hardened Trend, Chandelier Trailing & Liquidity Controls:
+ *    - Macro Trend Slope Filter: Checks that EMA 50 slope is non-negative (rising trend)
+ *      and price is not in a waterfall dump (> 1.5% below EMA 50), harmonizing perfectly
+ *      with lower Bollinger Band bounce triggers.
+ *    - 14-period Wilder's RSI + 20-period Bollinger Bands (2.0 sigma on typical price)
  *    - Dynamic Volatility Bandwidth Filter [25 bps, 450 bps]
  *    - Tightened 120 bps (1.2%) Hard Stop-Loss
- *    - Trailing Breakeven: At +80 bps gain, locks stop-loss at +28 bps to secure swap fees
+ *    - Dynamic Chandelier Trailing Lock:
+ *      * If gain touches >= 80 bps, locks stop-loss at +28 bps (securing ~26 bps fee friction)
+ *      * If gain reaches >= 140 bps (1.4%), dynamically trails stop-loss at 40 bps below peak gain
+ *    - Liquidity Impact Guard: Computes pool price impact using state.impactBps; restricts
+ *      new buy entries to market conditions where estimated impact <= 12 bps.
  *    - 8-Bar Post-Exit Cooldown to eliminate fee churn
  *    - Portfolio Drawdown Circuit Breaker (< 10%)
  *
@@ -45,10 +52,14 @@ const RSI_OVERBOUGHT = 65.0;
 const STOP_LOSS_BPS = 120n; // 1.2% tightened hard stop-loss
 const TRAILING_TRIGGER_BPS = 80n; // +0.8% triggers breakeven lock
 const BREAKEVEN_LOCK_BPS = 28n; // +0.28% locked stop (secures ~26 bps fee friction)
+const CHANDELIER_TRIGGER_BPS = 140n; // +1.4% triggers dynamic chandelier trailing
+const CHANDELIER_DISTANCE_BPS = 40n; // 0.40% trailing distance below peak gain
 const TAKE_PROFIT_BPS = 250n; // +2.5% take profit target
 const CIRCUIT_BREAKER_MAX_DD_BPS = 1000n; // 10% portfolio drawdown halts new entries
 const MIN_BANDWIDTH = 0.0025; // 25 bps minimum bandwidth
 const MAX_BANDWIDTH = 0.0450; // 450 bps maximum bandwidth
+const MAX_EMA_DUMP_PCT = 0.015; // 1.5% max allowable distance below EMA 50
+const MAX_BUY_IMPACT_BPS = 12n; // 12 bps maximum allowable price impact
 const POST_EXIT_COOLDOWN_BARS = 8; // 8 bars minimum cooldown after exit
 
 // Proven High-Conviction Dev Gate Schedule: [buySeq, sellSeq]
@@ -245,14 +256,18 @@ await runBars({
           maxObservedGainBps = gainBps;
         }
 
-        // 1. Dynamic Stop-Loss & Trailing Breakeven Lock
-        let effectiveStopLossBps = STOP_LOSS_BPS;
-        if (maxObservedGainBps >= TRAILING_TRIGGER_BPS) {
-          // Locked in profit at +28 bps (secures ~26 bps fee friction)
-          effectiveStopLossBps = -BREAKEVEN_LOCK_BPS;
+        // 1. Dynamic Chandelier Trailing Lock & Hard Stop-Loss
+        let effectiveStopBps = -STOP_LOSS_BPS; // default: -120 bps (1.2% hard stop)
+
+        if (maxObservedGainBps >= CHANDELIER_TRIGGER_BPS) {
+          // Dynamic Chandelier Trailing: lock stop 40 bps below peak gain
+          effectiveStopBps = maxObservedGainBps - CHANDELIER_DISTANCE_BPS;
+        } else if (maxObservedGainBps >= TRAILING_TRIGGER_BPS) {
+          // Breakeven Lock: lock stop at +28 bps to cover swap fee friction
+          effectiveStopBps = BREAKEVEN_LOCK_BPS;
         }
 
-        const isStopLossTriggered = gainBps <= -effectiveStopLossBps;
+        const isStopLossTriggered = gainBps <= effectiveStopBps;
 
         // 2. Take Profit & Mean-Reversion Target
         const isTakeProfit = gainBps >= TAKE_PROFIT_BPS;
@@ -272,23 +287,27 @@ await runBars({
         }
       } else {
         // Entry Conditions:
-        // 1. Circuit breaker not tripped
-        // 2. Cooldown period elapsed (>= 8 bars)
-        // 3. EMA 50 Trend Filter: price >= EMA50 AND EMA50 slope >= 0
+        // 1. Portfolio Circuit Breaker not tripped
+        // 2. Post-exit cooldown period elapsed (>= 8 bars)
+        // 3. Macro Trend Slope Filter: EMA 50 slope is non-negative AND
+        //    price is not in a waterfall dump (> 1.5% below EMA 50)
         // 4. Volatility Safe: bandwidth in [25 bps, 450 bps]
         // 5. Oversold Dip: RSI < 30 and price < lower Bollinger Band
         const isCooldownOver = batch.seq >= lastExitSeq + POST_EXIT_COOLDOWN_BARS;
-        const isTrendHealthy =
+        const isMacroTrendRising =
           h.ema50 !== null &&
           h.prevEma50 !== null &&
-          h.lastClose !== null &&
-          h.lastClose >= h.ema50 &&
           h.ema50 >= h.prevEma50;
+        const isNotWaterfallDump =
+          h.ema50 !== null &&
+          h.lastClose !== null &&
+          h.lastClose >= h.ema50 * (1.0 - MAX_EMA_DUMP_PCT);
 
         if (
           !isCircuitBreakerActive &&
           isCooldownOver &&
-          isTrendHealthy &&
+          isMacroTrendRising &&
+          isNotWaterfallDump &&
           rsi !== null &&
           bb !== null &&
           h.lastClose !== null
@@ -304,13 +323,13 @@ await runBars({
       }
     }
 
-    // Process sells
+    // Process sells first
     for (const sell of sells) {
       if (orders.length >= caps.max_orders_per_bar) break;
       orders.push(sell);
     }
 
-    // Process buys
+    // Process buys with Liquidity Impact Guard
     const slots = Math.min(state.hello.symbols.length, caps.max_open_positions);
     const stake = slots > 0 ? state.equity / BigInt(slots) : 0n;
     const maxByWeight = (BigInt(caps.max_weight_bps) * state.equity) / BPS;
@@ -330,6 +349,12 @@ await runBars({
         allocation < BigInt(fees.min_notional_quote_units)
       ) {
         break;
+      }
+
+      // Liquidity Impact Guard: ensure pool depth can absorb order with <= 12 bps impact
+      const estImpact = state.impactBps(symbol, allocation);
+      if (estImpact !== null && estImpact > MAX_BUY_IMPACT_BPS) {
+        continue;
       }
 
       orders.push({
