@@ -1,6 +1,10 @@
 # cbBTC Live Race 24h Trading Bot (`btc-race-24h-01`)
 
-An autonomous quantitative trading bot built for the **make.fun 24-Hour Live Race** (`btc-race-24h-20261118-1444`). The bot trades Coinbase Wrapped BTC (`cbBTC`) against `USDC` minute-by-minute using Orca Whirlpool pool-state samples on Solana under the `agent-fun/bars-replay/v1` protocol.
+[![make.fun · btc-race-24h-20261118-1444](https://make.fun/badge/btc-race-24h-20261118-1444.svg)](https://make.fun/bounty/btc-race-24h-20261118-1444?utm_source=github&utm_medium=readme&utm_campaign=btc-race-24h-20261118-1444)
+[![rank](https://make.fun/badge/btc-race-24h-20261118-1444/ricoxyz/btc-race-24h-01/rank.svg)](https://make.fun/bounty/btc-race-24h-20261118-1444/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=btc-race-24h-20261118-1444)
+[![reward](https://make.fun/badge/btc-race-24h-20261118-1444/ricoxyz/btc-race-24h-01/reward.svg)](https://make.fun/bounty/btc-race-24h-20261118-1444?utm_source=github&utm_medium=readme&utm_campaign=btc-race-24h-20261118-1444)
+
+An autonomous quantitative trading bot built for the **make.fun 24-Hour Live Race** ([Race a BTC trading bot live for 24 hours](https://make.fun/bounty/btc-race-24h-20261118-1444)). The bot trades Coinbase Wrapped BTC (`cbBTC`) against `USDC` minute-by-minute using Orca Whirlpool pool-state samples on Solana under the `agent-fun/bars-replay/v1` protocol.
 
 ## System Architecture & Modes
 
