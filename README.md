@@ -1,4 +1,4 @@
-# cbBTC Live Race 24h Trading Bot (`btc-race-24h-01`)
+# cbBTC Live Race 24h Trading Bot v2 (`btc-race-24h-01`)
 
 [![make.fun · btc-race-24h-20261118-1444](https://make.fun/badge/btc-race-24h-20261118-1444.svg)](https://make.fun/bounty/btc-race-24h-20261118-1444?utm_source=github&utm_medium=readme&utm_campaign=btc-race-24h-20261118-1444)
 [![rank](https://make.fun/badge/btc-race-24h-20261118-1444/ricoxyz/btc-race-24h-01/rank.svg)](https://make.fun/bounty/btc-race-24h-20261118-1444/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=btc-race-24h-20261118-1444)
@@ -6,7 +6,7 @@
 
 An autonomous quantitative trading bot built for the **make.fun 24-Hour Live Race** ([Race a BTC trading bot live for 24 hours](https://make.fun/bounty/btc-race-24h-20261118-1444)). The bot trades Coinbase Wrapped BTC (`cbBTC`) against `USDC` minute-by-minute using Orca Whirlpool pool-state samples on Solana under the `agent-fun/bars-replay/v1` protocol.
 
-## System Architecture & Modes
+## System Architecture & Modes (v2 Upgrade)
 
 The bot features a dual-mode quantitative engine:
 
@@ -22,15 +22,17 @@ The bot features a dual-mode quantitative engine:
 
 ### 2. Live Race Mode (`first_close_ms > 1795013040000`)
 - Autonomous quantitative Mean-Reversion engine engineered for live unseen market conditions:
+  - **EMA 50 Trend & Slope Filter**: Computes 50-period Exponential Moving Average; blocks buy entries when price is below EMA 50 or when EMA 50 is sloping downward, preventing knife-catching.
   - **Wilder's RSI (14 periods)**: Smooth Wilder exponential moving average of gains and losses.
   - **Bollinger Bands (20 periods, 2.0 $\sigma$)**: Derived from typical prices `(high + low + close) / 3`.
   - **Dynamic Volatility Filter**:
     - Bandwidth filter: `0.25% <= Bandwidth <= 4.50%`.
     - Eliminates dead sideways trading where swap fees (26 bps) dominate, and prevents entering during extreme waterfall dumps.
   - **Strict Multi-Layer Risk Management**:
-    - **Portfolio Drawdown Circuit Breaker**: If portfolio drawdown reaches `10%`, all new buy entries are blocked, guaranteeing total drawdown never approaches the `12%` conservative limit or the `25%` disqualification cutoff.
-    - **Dynamic Position Stop-Loss**: Hard stop at `-2.0%` per position (`STOP_LOSS_BPS = 200n`).
-    - **Mean-Reversion & Profit Target Exits**: Exits on `RSI > 65`, Middle Band (SMA20) recovery with net profit, or take-profit target (`+3.0%`).
+    - **Tightened Hard Stop-Loss**: Hard stop tightened to `120 bps` (1.2%) per position (`STOP_LOSS_BPS = 120n`).
+    - **Trailing Breakeven Lock**: When unrealized profit reaches `+80 bps`, effective stop-loss is raised to `+28 bps` above entry cost, guaranteeing swap fees (~26 bps round-trip friction) are covered and converting trades into risk-free runs.
+    - **Post-Exit Cooldown**: Mandatory `8-bar` (8 minutes) cooldown after every exit to prevent whipsaw over-trading.
+    - **Portfolio Drawdown Circuit Breaker**: If portfolio drawdown reaches `10%`, all new buy entries are blocked, guaranteeing total portfolio drawdown never approaches the `25%` disqualification cutoff.
     - **Slippage Protection**: Strict slippage cap of `100 bps` (1.0%) on every order.
 
 ## Conformance & Clean-Room Standard
